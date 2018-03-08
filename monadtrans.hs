@@ -1,0 +1,99 @@
+import Control.Monad.Trans
+import Control.Monad
+
+newtype MaybeT m a = MaybeT { runMaybeT :: m (Maybe a) }
+
+instance (Functor m) => Functor (MaybeT m) where
+    fmap f (MaybeT mma) = MaybeT $ (fmap . fmap) f mma
+
+instance (Applicative m) => Applicative (MaybeT m) where
+    pure x = MaybeT $ pure $ pure x
+
+    (MaybeT mab) <*> (MaybeT ma) = MaybeT $ (<*>) <$> mab <*> ma
+
+instance (Monad m) => Monad (MaybeT m) where
+    return = pure
+    -- mma :: m (Maybe a)
+    -- f :: a -> MaybeT m b
+    (MaybeT mma) >>= f = MaybeT $ mma >>= g 
+        where
+            g x = case x of
+                Nothing -> return Nothing
+                Just y -> (runMaybeT . f) y
+
+newtype EitherT e m a = EitherT {runEitherT :: m (Either e a) }
+
+instance Functor m => Functor (EitherT e m) where
+    fmap f (EitherT mea) = EitherT $ (fmap . fmap) f mea
+
+instance Applicative m => Applicative (EitherT e m) where
+    pure = EitherT . pure . pure 
+    (EitherT meab) <*> (EitherT mea) = EitherT $ ((<*>) <$> meab) <*> mea
+
+instance Monad m => Monad (EitherT e m) where
+    return = pure
+    (EitherT mea) >>= f = EitherT $ mea >>= g
+        where
+            g x = case x of
+                Left l -> return $ Left l
+                Right r -> (runEitherT . f) r
+
+newtype ReaderT r m a = ReaderT { runReaderT :: r -> m a }
+
+instance Functor m => Functor (ReaderT r m) where
+    fmap f (ReaderT rmg) = ReaderT $ (fmap . fmap) f rmg
+
+instance Applicative m => Applicative (ReaderT r m) where
+    pure = ReaderT . pure . pure
+    (ReaderT rmab) <*> (ReaderT rma) = ReaderT $ (<*>) <$> rmab <*> rma
+
+instance Monad m => Monad (ReaderT r m) where
+    return = pure
+    -- rma :: r -> m a
+    -- ?? :: m a -> (a -> (r -> m b))
+    -- f :: a -> ReaderT r m b
+    -- runReaderT . f :: a -> (r -> m b)
+    (ReaderT rma) >>= f = ReaderT $ \r -> ((rma r) >>= (\x -> (runReaderT . f) x r))
+
+newtype StateT s m a = StateT { runStateT :: s -> m (a, s) }
+
+instance (Functor m) => Functor (StateT s m) where
+    fmap f (StateT smas) = StateT $ \s -> ((\(y, z) -> (f y, z)) <$> (smas s))
+
+instance (Monad m) => Applicative (StateT s m) where
+    pure x = StateT $ \s -> pure (x, s)
+    -- sage advice: do the only thing you can possibly do that will typecheck
+    -- this will probably be the solution
+    (StateT f) <*> (StateT smas) = StateT $ \s -> 
+        ((smas s) >>= (\(x, y) -> (\(a1, s1) -> (a1 x, s1)) <$> (f s)))  
+
+instance (Monad m) => Monad (StateT s m) where
+    return = pure
+    (StateT smas) >>= f = StateT $ \s ->
+        (smas s) >>= (\(a, b) -> (runStateT $ f a) b)
+
+instance MonadTrans MaybeT where
+    lift = MaybeT . liftM Just
+
+
+instance MonadTrans (EitherT e) where
+    lift = EitherT . liftM Right
+
+instance MonadTrans (StateT s) where
+    lift ma = StateT $ \s -> do
+                            x <- ma
+                            return (x, s)
+
+instance MonadTrans (ReaderT r) where
+    lift = ReaderT . const
+
+instance (MonadIO m) => MonadIO (MaybeT m) where
+    liftIO = lift . liftIO
+
+instance (MonadIO m) => MonadIO (ReaderT r m) where
+    liftIO = lift . liftIO
+
+instance (MonadIO m) => MonadIO (StateT s m) where
+    liftIO = lift . liftIO
+
+
